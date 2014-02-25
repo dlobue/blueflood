@@ -67,9 +67,7 @@ public enum CoreConfig implements ConfigDefaults {
 
     INTERNAL_API_CLUSTER("127.0.0.1:50020,127.0.0.1:50020"),
 
-    GRAPHITE_HOST(""),
-    GRAPHITE_PORT("2003"),
-    GRAPHITE_PREFIX("unconfiguredNode.metrics."),
+    METRICS_REPORTERS(""),
 
     INGEST_MODE("true"),
     ROLLUP_MODE("true"),

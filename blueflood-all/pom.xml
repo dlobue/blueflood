@@ -59,35 +59,35 @@
       <version>${blueflood.version}</version>
     </dependency>
 
-    <dependency>
-      <artifactId>blueflood-udp</artifactId>
-      <groupId>com.rackspacecloud</groupId>
-      <version>${blueflood.version}</version>
-    </dependency>
+    <!--<dependency>-->
+      <!--<artifactId>blueflood-udp</artifactId>-->
+      <!--<groupId>com.rackspacecloud</groupId>-->
+      <!--<version>${blueflood.version}</version>-->
+    <!--</dependency>-->
 
-    <dependency>
-      <artifactId>blueflood-elasticsearch</artifactId>
-      <groupId>com.rackspacecloud</groupId>
-      <version>${blueflood.version}</version>
-    </dependency>
+    <!--<dependency>-->
+      <!--<artifactId>blueflood-elasticsearch</artifactId>-->
+      <!--<groupId>com.rackspacecloud</groupId>-->
+      <!--<version>${blueflood.version}</version>-->
+    <!--</dependency>-->
 
-    <dependency>
-      <artifactId>blueflood-statsd</artifactId>
-      <groupId>com.rackspacecloud</groupId>
-      <version>${blueflood.version}</version>
-    </dependency>
+    <!--<dependency>-->
+      <!--<artifactId>blueflood-statsd</artifactId>-->
+      <!--<groupId>com.rackspacecloud</groupId>-->
+      <!--<version>${blueflood.version}</version>-->
+    <!--</dependency>-->
 
-    <dependency>
-      <artifactId>blueflood-kafka</artifactId>
-      <groupId>com.rackspacecloud</groupId>
-      <version>${blueflood.version}</version>
-    </dependency>
+    <!--<dependency>-->
+      <!--<artifactId>blueflood-kafka</artifactId>-->
+      <!--<groupId>com.rackspacecloud</groupId>-->
+      <!--<version>${blueflood.version}</version>-->
+    <!--</dependency>-->
 
-    <dependency>
-      <artifactId>blueflood-cloudfiles</artifactId>
-      <groupId>com.rackspacecloud</groupId>
-      <version>${blueflood.version}</version>
-    </dependency>
+    <!--<dependency>-->
+      <!--<artifactId>blueflood-cloudfiles</artifactId>-->
+      <!--<groupId>com.rackspacecloud</groupId>-->
+      <!--<version>${blueflood.version}</version>-->
+    <!--</dependency>-->
   </dependencies>
 
 </project>

@@ -25,11 +25,13 @@ import com.codahale.metrics.jvm.GarbageCollectorMetricSet;
 import com.codahale.metrics.jvm.MemoryUsageGaugeSet;
 import com.codahale.metrics.jvm.ThreadStatesGaugeSet;
 import com.codahale.metrics.log4j.InstrumentedAppender;
+import com.addthis.metrics.reporter.config.ReporterConfig;
 import com.rackspacecloud.blueflood.service.Configuration;
 import com.rackspacecloud.blueflood.service.CoreConfig;
 import org.apache.log4j.LogManager;
 
 import javax.management.MBeanServer;
+import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.net.InetSocketAddress;
 import java.util.Collections;
@@ -39,12 +41,12 @@ import java.util.concurrent.TimeUnit;
 
 public class Metrics {
     private static final MetricRegistry registry = new MetricRegistry();
-    private static final GraphiteReporter reporter;
+    private static final ReporterConfig reporter;
     private static final JmxReporter reporter2;
     private static final String JVM_PREFIX = "jvm";
 
     static {
-        Configuration config = Configuration.getInstance();
+//        Configuration config = Configuration.getInstance();
 
         // register jvm metrics
         MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
@@ -61,20 +63,17 @@ public class Metrics {
         appender.activateOptions();
         LogManager.getRootLogger().addAppender(appender);
 
-        if (!config.getStringProperty(CoreConfig.GRAPHITE_HOST).equals("")) {
-            Graphite graphite = new Graphite(new InetSocketAddress(config.getStringProperty(CoreConfig.GRAPHITE_HOST), config.getIntegerProperty(CoreConfig.GRAPHITE_PORT)));
-
-            reporter = GraphiteReporter
-                    .forRegistry(registry)
-                    .convertDurationsTo(TimeUnit.MILLISECONDS)
-                    .convertRatesTo(TimeUnit.SECONDS)
-                    .prefixedWith(config.getStringProperty(CoreConfig.GRAPHITE_PREFIX))
-                    .build(graphite);
-
-            reporter.start(30l, TimeUnit.SECONDS);
-        } else {
-            reporter = null;
-        }
+        //if (!config.getStringProperty(CoreConfig.METRICS_REPORTERS).equals("")) {
+            reporter = initReporterConfig(registry);
+            //try {
+                //reporter = ReporterConfig.loadFromFileAndValidate(config.getStringProperty(CoreConfig.METRICS_REPORTERS));
+                //reporter.enableAll(registry);
+            //} catch (IOException e) {
+                //reporter = null;
+            //}
+//        } else {
+//            reporter = null;
+//        }
 
         reporter2 = JmxReporter
                 .forRegistry(registry)
@@ -99,6 +98,23 @@ public class Metrics {
         public Map<String, Metric> getMetrics() {
             return metricMap;
         }
+    }
+
+    private static ReporterConfig initReporterConfig(MetricRegistry registry) {
+        Configuration config = Configuration.getInstance();
+        if (!config.getStringProperty(CoreConfig.METRICS_REPORTERS).equals("")) {
+            try {
+                ReporterConfig myreporter = ReporterConfig.loadFromFileAndValidate(config.getStringProperty(CoreConfig.METRICS_REPORTERS));
+                myreporter.enableAll(registry);
+                return myreporter;
+            } catch (IOException e) {
+                //return null;
+            }
+        //} else {
+            //return null;
+            //reporter = null;
+        }
+        return null;
     }
 
     public static MetricRegistry getRegistry() {

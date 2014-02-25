@@ -254,5 +254,11 @@ public class BluefloodServiceStarter {
         startRollupService(rollupContext);
         startEventListenerModules();
         log.info("All blueflood services started");
+
+        try {
+            Thread.sleep(5*60*1000);
+        } catch (InterruptedException e) {
+        }
+
     }
 }
