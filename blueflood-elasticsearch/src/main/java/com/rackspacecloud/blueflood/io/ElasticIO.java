@@ -16,10 +16,9 @@
 
 package com.rackspacecloud.blueflood.io;
 
-import com.rackspacecloud.blueflood.service.Configuration;
 import com.rackspacecloud.blueflood.service.ElasticClientManager;
-import com.rackspacecloud.blueflood.service.ElasticIOConfig;
 import com.rackspacecloud.blueflood.service.RemoteElasticSearchServer;
+import com.rackspacecloud.blueflood.types.DiscoveryBuilder;
 import com.rackspacecloud.blueflood.types.DiscoveryResult;
 import com.rackspacecloud.blueflood.types.Locator;
 import com.rackspacecloud.blueflood.types.Metric;
@@ -28,42 +27,45 @@ import com.rackspacecloud.blueflood.utils.Util;
 
 import com.codahale.metrics.Timer;
 import org.elasticsearch.action.bulk.BulkRequestBuilder;
+import org.elasticsearch.action.get.GetResponse;
 import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.client.Client;
-import org.elasticsearch.common.xcontent.XContentBuilder;
-import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.index.query.BoolQueryBuilder;
 import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.search.SearchHit;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
-import static com.rackspacecloud.blueflood.io.ElasticIO.ESFieldLabel.*;
+//import static com.rackspacecloud.blueflood.io.ElasticIO.ESFieldLabel.*;
 import static org.elasticsearch.index.query.QueryBuilders.boolQuery;
 import static org.elasticsearch.index.query.QueryBuilders.termQuery;
 import static org.elasticsearch.index.query.QueryBuilders.wildcardQuery;
 
 public class ElasticIO implements DiscoveryIO {
-    static enum ESFieldLabel {
-        METRIC_NAME,
-        TENANT_ID,
-        TYPE,
-        UNIT
-    }
+//    static enum ESFieldLabel {
+//        METRIC_NAME,
+//        TENANT_ID,
+//        TYPE,
+//        UNIT
+//    }
 
     private static final Logger log = LoggerFactory.getLogger(DiscoveryIO.class);
+    private static final ObjectMapper mapper = new ObjectMapper();
     private final Client client;
     private static final String ES_TYPE = "metrics";
+    private static final String METRIC_NAME = "metricName";
+    private static final String TYPE = "type";
+    private static final String TENANT_ID = "tenantId";
+    private static final String UNIT = "unit";
     private static final String INDEX_PREFIX = "blueflood-";
     private final Timer searchTimer = Metrics.timer(ElasticIO.class, "Search Duration");
+    private final Timer getmetadataTimer = Metrics.timer(ElasticIO.class, "Get Metadata Timer");
 
     public static String getIndexPrefix() {
         return INDEX_PREFIX;
@@ -81,73 +83,111 @@ public class ElasticIO implements DiscoveryIO {
         this(manager.getClient());
     }
 
-    private static DiscoveryResult convertHitToMetricDiscoveryResult(SearchHit hit) {
-        Map<String, Object> source = hit.getSource();
-        String metricName = (String)source.get(METRIC_NAME.toString());
-        String tenantId = (String)source.get(TENANT_ID.toString());
-        String unit = (String)source.get(UNIT.toString());
-        DiscoveryResult result = new DiscoveryResult(tenantId, metricName, unit);
+//    private static DiscoveryResult convertHitToMetricDiscoveryResult(Map<String, Object> source) {
+//        String metricName = (String)source.get(METRIC_NAME.toString());
+//        String tenantId = (String)source.get(TENANT_ID.toString());
+//        String unit = (String)source.get(UNIT.toString());
+//        DiscoveryResult result = new DiscoveryResult(tenantId, metricName, unit);
+//
+//        return result;
+//    }
 
-        return result;
-    }
-
+    @Override
     public void insertDiscovery(List<Metric> batch) throws IOException {
         // TODO: check bulk insert result and retry
         BulkRequestBuilder bulk = client.prepareBulk();
         for (Metric metric : batch) {
             Locator locator = metric.getLocator();
-            Discovery md = new Discovery(locator.getTenantId(), locator.getMetricName());
-            Map<String, Object> info = new HashMap<String, Object>();
+            DiscoveryBuilder md = new DiscoveryBuilder(locator.getTenantId(), locator.getMetricName());
+//            Map<String, Object> info = new HashMap<String, Object>();
             if (metric.getUnit() != null) { // metric units may be null
-                info.put(UNIT.toString(), metric.getUnit());
+                md.setUnit(metric.getUnit());
+//                info.put(UNIT.toString(), metric.getUnit());
             }
-            info.put(TYPE.toString(), metric.getType());
-            md.withAnnotation(info);
+            md.setType(metric.getType().toString());
+//            info.put(TYPE.toString(), metric.getType());
+//            md.withAnnotation(info);
             bulk.add(createSingleRequest(md));
         }
         bulk.execute().actionGet();
     }
 
-    private IndexRequestBuilder createSingleRequest(Discovery md) throws IOException {
+    private IndexRequestBuilder createSingleRequest(DiscoveryBuilder md) throws IOException {
         if (md.getMetricName() == null) {
             throw new IllegalArgumentException("trying to insert metric discovery without a metricName");
         }
         return client.prepareIndex(getIndex(md.getTenantId()), ES_TYPE)
                 .setId(md.getDocumentId())
-                .setSource(md.createSourceContent());
+                .setCreate(true) // enables put-if-absent functionality
+                .setSource(mapper.writeValueAsString(md));
+//                .setSource(md.createSourceContent());
     }
 
     private String getIndex(String tenantId) {
         return INDEX_PREFIX + String.valueOf(Util.computeShard(tenantId));
     }
 
-    private static QueryBuilder createQuery(Discovery md) {
+    private static QueryBuilder createQuery(DiscoveryBuilder md) {
         BoolQueryBuilder qb = boolQuery()
                 .must(termQuery(TENANT_ID.toString(), md.getTenantId()));
         String metricName = md.getMetricName();
         if (!metricName.equals("*")) {
             if (metricName.contains("*")) {
-                qb.must(wildcardQuery("RAW_" + METRIC_NAME.toString(), metricName));
+                qb.must(wildcardQuery(METRIC_NAME + ".raw", metricName));
             } else {
-                qb.must(termQuery("RAW_" + METRIC_NAME.toString(), metricName));
+                qb.must(termQuery(METRIC_NAME + ".raw", metricName));
             }
         }
-        for (Map.Entry<String, Object> entry : md.getAnnotation().entrySet()) {
-            qb.should(termQuery(entry.getKey(), entry.getValue()));
+        if (md.getUnit() != null && !md.getUnit().isEmpty()) {
+            qb.must(termQuery(UNIT, md.getUnit()));
+        }
+        if (md.getType() != null && !md.getType().isEmpty()) {
+            qb.must(termQuery(TYPE, md.getType()));
         }
         return qb;
     }
 
-    public List<DiscoveryResult> getMetricsLike(String tenantId, String query) {
-        return search(new Discovery(tenantId, query));
+    @Override
+    public List<DiscoveryResult> getMetricsWithNameLike(String tenantId, String query) {
+        return search(new DiscoveryBuilder(tenantId, query));
     }
 
+    public List<DiscoveryResult> getMetricsWithUnitAndType(String tenantId, String unit) {
+        return search(new DiscoveryBuilder(tenantId).setUnit(unit));
+    }
+
+    public List<DiscoveryResult> getMetricsWithUnit(String tenantId, String unit) {
+        return search(new DiscoveryBuilder(tenantId).setUnit(unit));
+    }
+
+    public List<DiscoveryResult> getMetricsWithType(String tenantId, String type) {
+        return search(new DiscoveryBuilder(tenantId).setUnit(type));
+    }
+
+    @Override
     public List<DiscoveryResult> getMetrics(String tenantId) {
-        return search(new Discovery(tenantId, "*"));
+        return search(new DiscoveryBuilder(tenantId, "*"));
+    }
+
+    @Override
+    public DiscoveryResult getMetric(String tenantId, String metricName) {
+        DiscoveryBuilder md = new DiscoveryBuilder(tenantId, metricName);
+        GetResponse metricDoc = client.prepareGet(getIndex(md.getTenantId()), ES_TYPE, md.getDocumentId())
+                .setOperationThreaded(false)
+                .execute()
+                .actionGet();
+        try {
+            return mapper.readValue(metricDoc.getSourceAsBytes(), DiscoveryResult.class);
+        } catch (IOException e) {
+            log.error("Error deserializing result into DiscoveryResult bean", e);
+//            e.printStackTrace();
+            return null;
+        }
+//        return convertHitToMetricDiscoveryResult(metricDoc.getSource());
     }
 
 
-    public List<DiscoveryResult> search(Discovery md) {
+    public List<DiscoveryResult> search(DiscoveryBuilder md) {
         List<DiscoveryResult> result = new ArrayList<DiscoveryResult>();
         QueryBuilder query = createQuery(md);
         Timer.Context searchTimerCtx = searchTimer.time();
@@ -159,62 +199,71 @@ public class ElasticIO implements DiscoveryIO {
                 .actionGet();
         searchTimerCtx.stop();
         for (SearchHit hit : searchRes.getHits().getHits()) {
-            DiscoveryResult entry = convertHitToMetricDiscoveryResult(hit);
-            result.add(entry);
+            try {
+                DiscoveryResult entry = mapper.readValue(hit.getSourceAsString(), DiscoveryResult.class);
+                result.add(entry);
+            } catch (IOException e) {
+                log.error("Error deserializing result into DiscoveryResult bean", e);
+            }
+//            DiscoveryResult entry = convertHitToMetricDiscoveryResult(hit.getSource());
         }
         return result;
     }
 
-    public static class Discovery {
-        private Map<String, Object> annotation = new HashMap<String, Object>();
-        private final String metricName;
-        private final String tenantId;
-
-        public Discovery(String tenantId, String metricName) {
-            this.tenantId = tenantId;
-            this.metricName = metricName;
-        }
-        public Map<String, Object> getAnnotation() {
-            return annotation;
-        }
-
-        public String getTenantId() {
-            return tenantId;
-        }
-
-        public String getMetricName() {
-            return metricName;
-        }
-
-        public String getDocumentId() {
-            return tenantId + ":" + metricName;
-        }
-
-        @Override
-        public String toString() {
-            return "ElasticMetricDiscovery [tenantId=" + tenantId + ", metricName=" + metricName + ", annotation="
-                    + annotation.toString() + "]";
-        }
-
-        public Discovery withAnnotation(Map<String, Object> annotation) {
-            this.annotation = annotation;
-            return this;
-        }
-
-        private XContentBuilder createSourceContent() throws IOException {
-            XContentBuilder json;
-
-            json = XContentFactory.jsonBuilder().startObject()
-                    .field(TENANT_ID.toString(), tenantId)
-                    .field(METRIC_NAME.toString(), metricName);
-
-
-            for (Map.Entry<String, Object> entry : annotation.entrySet()) {
-                json = json.field(entry.getKey(), entry.getValue());
-            }
-            json = json.endObject();
-            return json;
-        }
-    }
+    //    public class Discovery implements Serializable {
+//        private String metricName;
+//        private String tenantId;
+//        private String unit;
+//        private String type;
+//
+//        public Discovery(String tenantId) {
+//            this.tenantId = tenantId;
+//        }
+//
+//        public Discovery(String tenantId, String metricName) {
+//            this.tenantId = tenantId;
+//            this.metricName = metricName;
+//        }
+//
+//        public Discovery setMetricName(String metricName) {
+//            this.metricName = metricName;
+//            return this;
+//        }
+//
+//        public Discovery setTenantId(String tenantId) {
+//            this.tenantId = tenantId;
+//            return this;
+//        }
+//
+//        public Discovery setUnit(String unit) {
+//            this.unit = unit;
+//            return this;
+//        }
+//
+//        public Discovery setType(String type) {
+//            this.type = type;
+//            return this;
+//        }
+//
+//        public String getUnit() {
+//            return unit;
+//        }
+//
+//        public String getType() {
+//            return type;
+//        }
+//
+//        public String getTenantId() {
+//            return tenantId;
+//        }
+//
+//        public String getMetricName() {
+//            return metricName;
+//        }
+//
+//        public String getDocumentId() {
+//            return tenantId + ":" + metricName;
+//        }
+//    }
 
 }
