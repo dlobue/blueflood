@@ -44,6 +44,8 @@ public class BatchWriter extends FunctionWithThreadPool<List<List<IMetric>>, Lis
     private final BatchIdGenerator batchIdGenerator = new BatchIdGenerator();
     // todo: CM_SPECIFIC verify changing metric class name doesn't break things.
     private final Timer writeDurationTimer = Metrics.timer(BatchWriter.class, "Write Duration");
+    private final Timer batchWriteDurationTimer = Metrics.timer(BatchWriter.class, "Single Batch Write Duration");
+    private final Timer slotUpdateTimer = Metrics.timer(BatchWriter.class, "Slot Update Duration");
     private final Meter exceededScribeProcessingTime = Metrics.meter(BatchWriter.class, "Write Duration Exceeded Timeout");
     private final TimeValue timeout;
     private final Counter bufferedMetrics;
@@ -77,6 +79,7 @@ public class BatchWriter extends FunctionWithThreadPool<List<List<IMetric>>, Lis
 
             ListenableFuture<Boolean> futureBatchResult = getThreadPool().submit(new Callable<Boolean>() {
                 public Boolean call() throws Exception {
+                    final Timer.Context singleBatchWriteCtx = batchWriteDurationTimer.time();
                     try {
                         // break into Metric and PreaggregatedMetric, as the put paths are somewhat different.
                         // todo: AstyanaxWriter needs a refactored insertFull() method that takes a collection of metrics,
@@ -95,10 +98,15 @@ public class BatchWriter extends FunctionWithThreadPool<List<List<IMetric>>, Lis
                             writer.insertFullMetrics(simpleMetrics);
                         if (preagMetrics.size() > 0)
                             writer.insertPreaggreatedMetrics(preagMetrics);
-                        
-                        // marks this shard dirty, so rollup nodes know to pick up the work.
-                        for (IMetric metric : batch) {
-                            context.update(metric.getCollectionTime(), Util.getShard(metric.getLocator().toString()));
+
+                        final Timer.Context dirtyTimerCtx = slotUpdateTimer.time();
+                        try {
+                            // marks this shard dirty, so rollup nodes know to pick up the work.
+                            for (IMetric metric : batch) {
+                                context.update(metric.getCollectionTime(), Util.getShard(metric.getLocator().toString()));
+                            }
+                        } finally {
+                            dirtyTimerCtx.stop();
                         }
                         
                         return true;
@@ -107,6 +115,7 @@ public class BatchWriter extends FunctionWithThreadPool<List<List<IMetric>>, Lis
                         successfullyPersisted.set(false);
                         return false;
                     } finally {
+                        singleBatchWriteCtx.stop();
                         shortLatch.countDown();
                         bufferedMetrics.dec(batch.size());
                         
